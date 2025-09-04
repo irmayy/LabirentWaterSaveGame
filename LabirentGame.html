@@ -1,0 +1,308 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #e0f7fa; /* Light blue background */
+            margin: 0;
+            padding: 0;
+        }
+        #info {
+            margin: 20px auto;
+            color: #000000;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #maze {
+            display: grid;
+            grid-template-columns: repeat(30, 25px);
+            grid-template-rows: repeat(24, 25px);
+            gap: 1px;
+            margin: 20px auto;
+            width: 760px;
+            background: #90ee90; /* Light green ground */
+        }
+        .cell {
+            width: 25px;
+            height: 25px;
+            border: 1px solid #00332b; /* Dark border */
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        .wall {
+            background-color: #004d40; /* Dark green walls */
+        }
+        .player {
+            background-color: #0000ff; /* Blue square player */
+        }
+        .goal {
+            background-color: #0000ff; /* Blue water */
+            color: white;
+            font-weight: bold;
+        }
+        .bottle {
+            background-color: #add8e6; /* Light blue bottles */
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="25" height="25"><rect x="8" y="4" width="9" height="17" fill="none" stroke="black" stroke-width="1"/><circle cx="12.5" cy="4" r="2.5" fill="none" stroke="black" stroke-width="1"/></svg>');
+            background-size: cover;
+        }
+        #message {
+            font-size: 24px;
+            margin: 20px;
+            color: #000000;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        #timer, #score {
+            font-size: 20px;
+            margin: 10px;
+            color: #000000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Ok tuşlarıyla ilerleyin.</div>
+    <div id="timer">Kalan Süre: 50</div>
+    <div id="score">Puan: 0</div>
+    <div id="maze"></div>
+    <div id="message"></div>
+    <script>
+        const WIDTH = 30;
+        const HEIGHT = 24;
+        const START = { x: 1, y: 1 };
+        let mazeLayout = generateMaze(HEIGHT, WIDTH);
+        let playerPos = { ...START };
+        let score = 0;
+        let time = 50;
+        let gameOver = false;
+
+        function generateMaze(rows, cols) {
+            const grid = Array.from({ length: rows }, () => Array(cols).fill(1));
+            const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+
+            function carve(y, x) {
+                grid[y][x] = 0;
+                visited[y][x] = true;
+                const directions = [[0, 2], [2, 0], [0, -2], [-2, 0]]; // right, down, left, up
+                directions.sort(() => Math.random() - 0.5);
+                for (let [dy, dx] of directions) {
+                    const ny = y + dy;
+                    const nx = x + dx;
+                    if (ny >= 0 && ny < rows && nx >= 0 && nx < cols && !visited[ny][nx]) {
+                        grid[y + dy / 2][x + dx / 2] = 0;
+                        carve(ny, nx);
+                    }
+                }
+            }
+
+            carve(START.y, START.x);
+
+            const numLoops = Math.floor(rows * cols * 0.1);
+            for (let i = 0; i < numLoops; i++) {
+                const y = Math.floor(Math.random() * (rows - 2)) + 1;
+                const x = Math.floor(Math.random() * (cols - 2)) + 1;
+                if (grid[y][x] === 1) {
+                    grid[y][x] = 0;
+                }
+            }
+
+            const goal = findFarthest(START, grid);
+            grid[goal.y][goal.x] = 2;
+
+            const numBottles = Math.floor(rows * cols * 0.05);
+            for (let i = 0; i < numBottles; i++) {
+                const candidates = [];
+                for (let y = 1; y < rows - 1; y++) {
+                    for (let x = 1; x < cols - 1; x++) {
+                        if (grid[y][x] === 0 && !(x === START.x && y === START.y) && !(x === goal.x && y === goal.y)) {
+                            candidates.push({ x, y });
+                        }
+                    }
+                }
+                if (candidates.length === 0) break;
+                const rand = candidates[Math.floor(Math.random() * candidates.length)];
+                grid[rand.y][rand.x] = 3;
+                if (!hasPath(START, goal, grid)) {
+                    grid[rand.y][rand.x] = 0;
+                }
+            }
+
+            return grid;
+        }
+
+        function findFarthest(start, maze) {
+            const rows = maze.length;
+            const cols = maze[0].length;
+            const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+            const queue = [{ x: start.x, y: start.y, dist: 0 }];
+            visited[start.y][start.x] = true;
+            let far = { x: start.x, y: start.y };
+            let maxDist = 0;
+            while (queue.length) {
+                const curr = queue.shift();
+                if (curr.dist > maxDist) {
+                    maxDist = curr.dist;
+                    far = { x: curr.x, y: curr.y };
+                }
+                const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+                for (let [dx, dy] of dirs) {
+                    const nx = curr.x + dx;
+                    const ny = curr.y + dy;
+                    if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && maze[ny][nx] !== 1 && maze[ny][nx] !== 3) {
+                        visited[ny][nx] = true;
+                        queue.push({ x: nx, y: ny, dist: curr.dist + 1 });
+                    }
+                }
+            }
+            return far;
+        }
+
+        function hasPath(start, goal, maze) {
+            const rows = maze.length;
+            const cols = maze[0].length;
+            const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+            const queue = [{ x: start.x, y: start.y }];
+            visited[start.y][start.x] = true;
+            while (queue.length) {
+                const curr = queue.shift();
+                if (curr.x === goal.x && curr.y === goal.y) return true;
+                const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+                for (let [dx, dy] of dirs) {
+                    const nx = curr.x + dx;
+                    const ny = curr.y + dy;
+                    if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !visited[ny][nx] && maze[ny][nx] !== 1 && maze[ny][nx] !== 3) {
+                        visited[ny][nx] = true;
+                        queue.push({ x: nx, y: ny });
+                    }
+                }
+            }
+            return false;
+        }
+
+        function drawMaze() {
+            const mazeDiv = document.getElementById('maze');
+            mazeDiv.innerHTML = '';
+            for (let y = 0; y < HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    if (mazeLayout[y][x] === 1) cell.classList.add('wall');
+                    if (mazeLayout[y][x] === 3) cell.classList.add('bottle');
+                    if (playerPos.x === x && playerPos.y === y) {
+                        cell.classList.add('player');
+                    }
+                    if (mazeLayout[y][x] === 2) {
+                        cell.classList.add('goal');
+                        cell.textContent = '💧';
+                    }
+                    mazeDiv.appendChild(cell);
+                }
+            }
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = 'Puan: ' + score;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameOver) return;
+            e.preventDefault();
+            console.log('Key pressed:', e.key);
+            let newX = playerPos.x;
+            let newY = playerPos.y;
+            switch (e.key) {
+                case 'ArrowUp': newY--; break;
+                case 'ArrowDown': newY++; break;
+                case 'ArrowLeft': newX--; break;
+                case 'ArrowRight': newX++; break;
+            }
+            if (mazeLayout[newY] && mazeLayout[newY][newX] !== 1 && mazeLayout[newY][newX] !== 3) {
+                playerPos.x = newX;
+                playerPos.y = newY;
+                if (mazeLayout[newY][newX] === 0) {
+                    score += 1;
+                    updateScore();
+                }
+                drawMaze();
+                checkGoal();
+            } else if (mazeLayout[newY] && mazeLayout[newY][newX] === 3) {
+                score -= 5;
+                if (score < 0) score = 0;
+                updateScore();
+                endGame('Şişeye çarptın! 😢 Puan: ' + score);
+            }
+        });
+
+        function checkGoal() {
+            if (mazeLayout[playerPos.y][playerPos.x] === 2) {
+                gameOver = true;
+                clearInterval(timerInterval);
+                document.getElementById('message').textContent = 'Kazandınız! Suya ulaştın! 💧 Puan: ' + score;
+            }
+        }
+
+        const timerElement = document.getElementById('timer');
+        const timerInterval = setInterval(() => {
+            if (gameOver) {
+                clearInterval(timerInterval);
+                return;
+            }
+            time--;
+            timerElement.textContent = 'Kalan Süre: ' + time;
+            if (time <= 0) {
+                gameOver = true;
+                document.getElementById('message').textContent = 'Süre doldu! Suya ulaşamadın 😢 Puan: ' + score;
+            }
+        }, 1000);
+
+        drawMaze();
+        updateScore();
+    </script>
+</body>
+</html>
